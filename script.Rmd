@@ -1,0 +1,502 @@
+---
+title: "LEXpander: applying colexification networks to automated lexicon expansion"
+author: "Anna Di Natale, David Garcia"
+date: "5/2022"
+output: pdf_document
+---
+Loading useful packages and libraries
+```{r}
+library(plyr) #version 1.8.4
+library(dplyr) #for data transformations, version 1.0.7
+# library(lsa) ##for the word embedding model, version 0.73.2
+# library(text2vec) ##for the GloVe embedding model, version 0.6
+library(ggplot2) ##for plots, version 3.3.2
+library(reticulate) #for working with Python, version 1.16
+library(stringr) ##fro dealing with strings, version 1.3.1
+```
+
+Loading useful functions
+```{r}
+##Set python path, python 3.8 required for running the VADER script
+use_python("/usr/bin/python3.8", required = T) #INSERT YOUR PYTHON 3.8 path
+source('scripts/expand_wordlist.R') #word lists expansion algorithms
+source('scripts/cor_on_texts.R') ##text analysis task
+source('scripts/random_wordlist.R') ##computation of the baseline models
+source('scripts/count_string.R') ##counts words in a string
+source('scripts/compute_correlation.R') ##function for the correlation of text analysis tasks
+```
+
+To run the lexicon expansion algorithms on the EVs:
+```{r}
+method<-'wordnet'
+# res<-expand_wordlist_EV(method)
+# saveRDS(res,paste0('results/EV_2015en_',method,'.Rda'))
+```
+
+Computation of the baseline method. Returns the random word lists. It might take some time
+```{r}
+# for (i in seq(1,1000)) ##setting the number of repetitions
+# {baseline<-random_wordlist('wordnet','EV')}
+
+```
+
+
+Table 2: Precision, recall and F1 of the expanded lexica on LIWC 2015 English)
+```{r}
+perc<-"0.3"  ##choose the percentage of seed words from LIWC
+report_df<-data.frame(stringsAsFactors = F)
+for(method in c('freedict','wordnet','empath_new','fasttext','glove')) ##loop on the methods
+{
+  res<-readRDS(paste0('results/2015en_',method,'.Rda')) ##read the results
+  sel1<-res[res$perc==perc,] ##select only the results relative to the chosen percentage of seed words
+  sel<-sel1[sel1$length!=0,]  ##exclude the word lists with no seed words for said percentage
+  baseline<-readRDS(paste0('results/baseline_2015en_',method,'.Rda')) ##read the results of the baseline method
+  sel_bl<-baseline[baseline$perc==perc,] ##results for the threshold of seed words are selected
+  sel_bl<-sel_bl[sel_bl$mean_F1>0,]
+  ##computing the means of precision, recall and F1
+  bl_prec<-round(mean(sel_bl$mean_prec),digits=2) 
+  bl_rec<-round(mean(sel_bl$mean_rec),digits=2)
+  bl_F1<-round(mean(sel_bl$mean_F1),digits=2)
+  
+  df<-data.frame(method=method, perc_seed=perc, mean_prec=round(mean(sel$mean_prec),digits=2), bl_prec=bl_prec, mean_rec=round(mean(sel$mean_rec),digits=2), bl_rec=bl_rec, mean_F1=round(mean(sel$mean_F1),digits=2), bl_F1=bl_F1, mean_size=round(mean(sel$length),digits=0),stringsAsFactors = F)
+  report_df<-rbind(report_df,df)
+}
+report_df$method[report_df$method=='freedict']<-'LEXpander'
+report_df$method[report_df$method=='empath_new']<-'Empath 2.0'
+report_df$method[report_df$method=='fasttext']<-'FastText'
+report_df$method[report_df$method=='glove']<-'GloVe'
+report_df$method[report_df$method=='wordnet']<-'WordNet'
+print(report_df)
+```
+
+
+Table 1 supplementary materials: length of word lists relative to expansion of a random sample of LIWC 2015 in English.
+```{r} 
+perc<-"0.3" ##percentage of seed words
+report_df<-data.frame(stringsAsFactors = F)
+
+for(method in c('freedict','wordnet','empath_new','fasttext','glove'))   ##loop on the methods
+{
+  res<-readRDS(paste0('results/2015en_',method,'.Rda')) ##select the results
+  sel<-res[res$perc==perc,] ##select only the results relative to the chosen percentage of seed words
+  sel<-sel[sel$length!=0,] ##exclude the word lists with no seed words
+  labels<-c('Negemo','Posemo','Anx','Anger','Sad')
+  selection<-c(31:35) ##labels relative to emotional word lists
+  j<-0
+  for (i in selection)
+  {
+    j<-j+1
+    only_one<-sel[sel$cat_id==i,] ##only the category of the loop
+    df<-data.frame(method=method, perc_seed=perc,cat=labels[j],mean_length=round(only_one$length),stringsAsFactors = F) ##selecting and rounding the length
+    report_df<-rbind(report_df,df)
+  }
+  df<-data.frame(method=method, perc_seed=perc,cat='All',mean_length=round(mean(sel$length)),stringsAsFactors = F) ##mean on all categories
+  report_df<-rbind(report_df,df)
+}
+report_df$method[report_df$method=='freedict']<-'LEXpander'
+report_df$method[report_df$method=='empath_new']<-'Empath 2.0'
+report_df$method[report_df$method=='fasttext']<-'FastText'
+report_df$method[report_df$method=='glove']<-'GloVe'
+report_df$method[report_df$method=='wordnet']<-'WordNet'
+print(report_df)
+```
+
+Figure 3: dependence of F1 on the percentage of seed words (LIWC 2015 English)
+```{r}
+mean_all<-data.frame(stringsAsFactors = F)
+mean_bl<-data.frame(stringsAsFactors = F)
+for (method in c('freedict','wordnet','empath_new','fasttext','glove')) ##loop on the methods
+{
+  res<-readRDS(paste0('results/2015en_',method,'.Rda')) ##load the data
+  sel<-res[res$length!=0,] ##only results relative to categories with seed words
+  means<-data.frame(mean_F1=tapply(res$mean_F1,res$perc,mean), sd_F1=tapply(res$sd_F1,res$perc,mean),method=method,th=c(10,20,30,40,50,60,70,80,90),stringsAsFactors = F)
+  mean_all<-rbind(mean_all,means)
+
+    bl<-readRDS(paste0('results/baseline_2015en_',method,'.Rda')) ##load the results of the baseline method
+    bl<-bl[bl$mean_F1>0,] ##select only the categories to which we added at least one word
+    means<-data.frame(mean_F1=tapply(bl$mean_F1,bl$perc,mean), sd_F1=tapply(bl$sd_F1,bl$perc,mean),method=method,th=c(10,20,30,40,50,60,70,80,90),stringsAsFactors = F)
+    mean_bl<-rbind(mean_bl,means)
+
+}
+
+##change names to the methods
+mean_all$method[mean_all$method=='empath_new']<-'Empath 2.0'
+mean_all$method[mean_all$method=='freedict']<-'LEXpander'
+mean_all$method[mean_all$method=='fasttext']<-'FastText'
+mean_all$method[mean_all$method=='wordnet']<-'WordNet'
+mean_all$method[mean_all$method=='glove']<-'GloVe'
+
+bl<-data.frame(mean_F1=rep(0,9), sd_F1=rep(0,9), minF1=tapply(mean_bl$mean_F1,mean_bl$th,min), maxF1=tapply(mean_bl$mean_F1,mean_bl$th,max), method="baseline", th=c(10,20,30,40,50,60,70,80,90), stringsAsFactors = F) ##min and max of the F1s of all baseline methods
+
+##plot F1 vs percentage
+ggplot(data = mean_all, aes(x = th)) + 
+  geom_line(aes(y=mean_F1,color=method))+
+  geom_point(aes(y=mean_F1,shape=method))+
+  geom_ribbon(data=bl,aes(ymin=minF1,ymax=maxF1),fill='grey70', alpha = 0.5)+
+        labs(x='percentage random seed words',y='mean F1')+
+        scale_x_continuous(breaks = c(10,20,30,40,50,60,70,80,90))+
+        theme_bw()
+
+
+```
+
+Table 2 supplementary materials: Precision, recall and F1 of the expansion of the EVs
+```{r}
+report_df<-data.frame(stringsAsFactors = F)
+
+for(method in c('EV','freedict','fasttext','glove','wordnet','empath_new')) ##loop on the methods
+{
+  if(method=='EV')
+  {res<-readRDS('results/2015en_EV.Rda')} ##loading results relative to the original EV dataset
+  else
+  {res<-readRDS(paste0('results/EV_2015en_',method,'.Rda'))} ##loading the results
+  res<-res[res$cat_id %in% seq(1,5),] ##selecting the word lists relative to posemo, negemo, anxfear, sadness, anger (the emotional categories of EVs)
+ 
+  if(!method%in%c('EV'))
+  {
+    baseline<-readRDS(paste0('results/baseline_EV_',method,'.Rda')) ##loading baseline results
+    baseline<-baseline[baseline$cat_id%in% seq(1,5),] ##selecting only the emotional categories
+    #means of precision, recall and F1
+    bl_prec<-round(mean(baseline$prec),digits=2)
+    bl_rec<-round(mean(baseline$rec),digits=2)
+    bl_F1<-round(mean(baseline$F1),digits=2)
+  }
+  else ##we don't have a baseline method for the EVs
+  {
+    bl_prec<-NA
+    bl_rec<-NA
+    bl_F1<-NA
+  }
+   df<-data.frame(method=method,selection='EV',mean_prec=round(mean(res$prec),digits=2), bl_prec=bl_prec, mean_rec=round(mean(res$rec),digits=2), bl_rec=bl_rec, mean_F1=round(mean(res$F1),digits=2), bl_F1=bl_F1,mean_size=round(mean(res$length),digits=0),stringsAsFactors = F)
+  
+  report_df<-rbind(report_df,df)
+
+}
+report_df$method[report_df$method=='freedict']<-'LEXpander'
+report_df$method[report_df$method=='empath_new']<-'Empath 2.0'
+report_df$method[report_df$method=='fasttext']<-'FastText'
+report_df$method[report_df$method=='glove']<-'GloVe'
+report_df$method[report_df$method=='wordnet']<-'WordNet'
+print(report_df)
+```
+
+Table 3: Comparison between the expansion of the EVs and the expansion of random words from LIWC 2015
+```{r}
+report_df<-data.frame(stringsAsFactors = F) ##results of the expansion of the EVs
+report_df_random<-data.frame(stringsAsFactors = F) ##results of the expansion of a random subset of LIWC 2015
+for(method in c('freedict','wordnet','empath_new','fasttext','glove'))  ##loop on the methods
+{
+  res<-readRDS(paste0('results/EV_2015en_',method,'.Rda')) ##load the results for the expansion of the EVs
+  res<-res[res$cat_id %in% seq(1,5),] ##selecting the word lists relative to posemo, negemo, anxfear, sadness, anger
+    df<-data.frame(method=method,selection='EV',mean_prec=round(mean(res$prec),digits = 2),mean_rec=round(mean(res$rec),digits = 2), mean_F1=round(mean(res$F1),digits=2),stringsAsFactors = F)
+  report_df<-rbind(report_df,df)
+  
+  res_random<-readRDS(paste0('results/2015en_comparisonEV_',method,'.Rda')) ##load the results for the expansion of a random selection of LIWC
+  df<-data.frame(method=method,selection='random',mean_prec=round(mean(res_random$mean_prec),digits = 2), mean_sdprec=round(mean(res_random$sd_prec),digits = 2), mean_rec=round(mean(res_random$mean_rec),digits = 2),mean_sdrec=round(mean(res_random$sd_rec),digits = 2), mean_F1=round(mean(res_random$mean_F1),digits=2), mean_sdF1=round(mean(res_random$sd_F1),digits=2), stringsAsFactors = F)
+  report_df_random<-rbind(report_df_random,df)
+}
+report_df$method[report_df$method=='freedict']<-'LEXpander'
+report_df$method[report_df$method=='empath_new']<-'Empath 2.0'
+report_df$method[report_df$method=='fasttext']<-'FastText'
+report_df$method[report_df$method=='glove']<-'GloVe'
+report_df$method[report_df$method=='wordnet']<-'WordNet'
+
+report_df_random$method[report_df_random$method=='freedict']<-'LEXpander'
+report_df_random$method[report_df_random$method=='empath_new']<-'Empath 2.0'
+report_df_random$method[report_df_random$method=='fasttext']<-'FastText'
+report_df_random$method[report_df_random$method=='glove']<-'GloVe'
+report_df_random$method[report_df_random$method=='wordnet']<-'WordNet'
+
+print(report_df)
+print(report_df_random)
+```
+
+Table 4: precision study of the expansion of the EVs
+```{r}
+report_df<-data.frame(stringsAsFactors = F)
+table<-data.frame(stringsAsFactors = F)
+
+for(method in c('freedict','wordnet','fasttext','glove','empath_new')) 
+{
+  res<-readRDS(paste0('results/EV_2015en_',method,'.Rda')) ##loading the results
+  res<-res[res$cat_id %in% seq(1,2),] ##selecting only positive and negative categories
+  df<-data.frame(method=method,mode='lower_bound',cat='Negative',prec=round(res$prec[res$cat_id==1],digits = 2),ci1=NA,ci2=NA,stringsAsFactors = F) ##precision*
+  report_df<-rbind(report_df,df)
+  df<-data.frame(method=method,mode='lower_bound',cat='Positive',prec=round(res$prec[res$cat_id==2],digits = 2),ci1=NA,ci2=NA,stringsAsFactors = F) ##precision*
+  report_df<-rbind(report_df,df)
+  df<-data.frame(method=method,mode='adjusted',cat='Negative',prec=round(res$prec_adj[res$cat_id==1], digits = 2), ci1=round(res$ci1_prec[res$cat_id==1],digits=2), ci2=round(res$ci2_prec[res$cat_id==1],digits=2), stringsAsFactors = F) ## real precision
+  report_df<-rbind(report_df,df)
+  df<-data.frame(method=method,mode='adjusted',cat='Positive',prec=round(res$prec_adj[res$cat_id==2],digits = 2), ci1=round(res$ci1_prec[res$cat_id==2],digits=2), ci2=round(res$ci2_prec[res$cat_id==2],digits=2), stringsAsFactors = F) ##real precision
+  report_df<-rbind(report_df,df)
+  df1<-data.frame(method=method,cat='Positive',prec=res$prec[res$cat_id==2],adj_prec=res$prec_adj[res$cat_id==2],stringsAsFactors = F)
+   table<-rbind(table,df1)
+  df1<-data.frame(method=method,cat='Negative',prec=res$prec[res$cat_id==1],adj_prec=res$prec_adj[res$cat_id==1],stringsAsFactors = F)
+  table<-rbind(table,df1)
+}
+report_df$method[report_df$method=='freedict']<-'LEXpander'
+report_df$method[report_df$method=='empath_new']<-'Empath 2.0'
+report_df$method[report_df$method=='fasttext']<-'FastText'
+report_df$method[report_df$method=='glove']<-'GloVe'
+report_df$method[report_df$method=='wordnet']<-'WordNet'
+print(report_df)
+
+
+cor.test(table$prec,table$adj_prec) ##computation of the correlation between real and lower bound values for precision
+```
+
+
+ 
+Table 3 supplementary materials: length of the expanded word lists from EVs
+```{r} 
+report_df<-data.frame(stringsAsFactors = F)
+for(method in c('EV','freedict','fasttext','wordnet','empath_new','glove')) ##loop on the methods
+{
+  if(method=='EV')
+  {res<-readRDS('results/2015en_EV.Rda')} ##loading the comparison between EV and LIWC 2015
+  else
+  {res<-readRDS(paste0('results/EV_2015en_',method,'.Rda'))} ##loading the results
+  sel<-res[res$length>0,] ##select only the categories to which we added at least one word
+
+  labels<-c('Negemo','Posemo','AnxFear','Anger','Sad')
+  selection<-c(1:5) ##labels relative to emotional word lists
+  j<-0
+  for (i in selection)
+  {
+    j<-j+1
+    only_one<-sel[sel$cat_id==i,] ##selecting only one emotional category
+    df<-data.frame(method=method,cat=labels[j],length=only_one$length,stringsAsFactors = F)
+    report_df<-rbind(report_df,df)
+  }
+  df<-data.frame(method=method, cat='All',length=round(mean(sel$length[sel$cat_id%in%selection])),stringsAsFactors = F) ##mean on all the categories
+   report_df<-rbind(report_df,df)
+}
+report_df$method[report_df$method=='freedict']<-'LEXpander'
+report_df$method[report_df$method=='empath_new']<-'Empath 2.0'
+report_df$method[report_df$method=='fasttext']<-'FastText'
+report_df$method[report_df$method=='glove']<-'GloVe'
+report_df$method[report_df$method=='wordnet']<-'WordNet'
+print(report_df)
+```
+
+Table 5: precision, recall and F1 of the expansion algorithms on the German LIWC
+```{r}
+perc<-'0.3' ##selecting the percentage of seed words
+mean_all<-data.frame(stringsAsFactors = F)
+for(method in c('glove_deu','empath_new_deu','fasttext_deu','freedict_deu','odenet'))  ##loop on the methods
+{
+  res<-readRDS(paste0('results/2007deu_',method,'.Rda')) ##load the results
+  res1<-res[res$perc==perc,] ##selecting the results relative to the chosen threshold
+  res<-res1[res1$length!=0,] ##selecting the word lists to which we add at least one word
+  baseline<-readRDS(paste0('results/baseline_2007deu_',method,'.Rda')) ##loading the baseline results
+  sel_bl<-baseline[baseline$perc==perc,] ##results for the threshold of seed words are selected
+  sel_bl<-sel_bl[sel_bl$mean_F1>0,] ##select only the categories to which we added at least one word
+  
+ df<-data.frame(method=method,mean_prec=round(mean(res$mean_prec),digits=2),bl_prec=round(mean(sel_bl$mean_prec),digits=2), mean_rec=round(mean(res$mean_rec),digits=2),bl_rec=round(mean(sel_bl$mean_rec),digits=2), mean_F1=round(mean(res$mean_F1,),digits=2), bl_F1=round(mean(sel_bl$mean_F1),digits=2), mean_size=round(mean(res$length)),stringsAsFactors = F)
+  mean_all<-rbind(mean_all,df)
+}
+mean_all$method[mean_all$method=='empath_new_deu']<-'Empath 2.0'
+mean_all$method[mean_all$method=='freedict_deu']<-'LEXpander'
+mean_all$method[mean_all$method=='fasttext_deu']<-'FastText'
+mean_all$method[mean_all$method=='odenet']<-'OdeNet'
+mean_all$method[mean_all$method=='glove_deu']<-'GloVe'
+print(mean_all)
+```
+
+Table 4 supplementary materials: length of word lists expanded from the LIWC 2007 German 
+```{r} 
+perc<-"0.3" ##percentage of seed words
+report_df<-data.frame(stringsAsFactors = F)
+for(method in c('freedict_deu','odenet','fasttext_deu','glove_deu','empath_new_deu'))  ##loop on the methods
+{
+  res<-readRDS(paste0('results/2007deu_',method,'.Rda')) ##select the results
+  sel<-res[res$perc==perc,] ##results for a threshold of 30% seed words are selected
+  sel<-sel[sel$length!=0,] ##select only the categories to which we added at least one word
+  labels<-c('Negemo','Posemo','Anx','Anger','Sad')
+  selection<-c(16,13,17:19) #labels relative to emotional word lists
+  j<-0
+  for (i in selection)
+  {
+    j<-j+1
+    only_one<-sel[sel$cat_id==i,] ##select the results relative to only one emotional category
+    if(nrow(only_one)>0)
+    {df<-data.frame(method=method, perc_seed=perc,cat=labels[j],mean_length=round(only_one$length),stringsAsFactors = F)
+    report_df<-rbind(report_df,df)}
+  }
+  df<-data.frame(method=method, perc_seed=perc,cat='All',mean_length=round(mean(sel$length)),stringsAsFactors = F) ##mean on all the emotional categories
+  report_df<-rbind(report_df,df)
+}
+report_df$method[report_df$method=='freedict_deu']<-'LEXpander'
+report_df$method[report_df$method=='empath_new_deu']<-'Empath 2.0'
+report_df$method[report_df$method=='fasttext_deu']<-'FastText'
+report_df$method[report_df$method=='glove_deu']<-'GloVe'
+report_df$method[report_df$method=='odenet']<-'OdeNet'
+print(report_df)
+```
+
+Figure 4: dependence on the percentage of seed words (LIWC 2007 German)
+```{r}
+mean_all<-data.frame(stringsAsFactors = F) #stores the results of the methods
+mean_bl<-data.frame(stringsAsFactors = F) ##stores the baseline results
+for (method in c('freedict_deu','glove_deu','empath_new_deu','fasttext_deu','odenet'))  ##loop on the methods
+{
+  res<-readRDS(paste0('results/2007deu_',method,'.Rda'))
+  res<-res[res$length!=0,] ##select only the categories to which we added at least one word
+  means<-data.frame(mean_F1=tapply(res$mean_F1,res$perc,mean), sd_F1=tapply(res$sd_F1,res$perc,mean), method=method, th=c(10,20,30,40,50,60,70,80,90), stringsAsFactors = F)
+  mean_all<-rbind(mean_all,means)
+
+  baseline<-readRDS(paste0('results/baseline_2007deu_',method,'.Rda')) ##load the results of the baseline method
+  bl<-baseline[baseline$mean_F1>0,] ##select only the categories to which we added at least one word
+    means<-data.frame(mean_F1=tapply(bl$mean_F1,bl$perc,mean), sd_F1=tapply(bl$sd_F1,bl$perc,mean),method=paste0(method,'_bl'), th=c(10,20,30,40,50,60,70,80,90), stringsAsFactors = F)
+    mean_bl<-rbind(mean_bl,means)
+}
+
+bl<-data.frame(mean_F1=rep(0,9), sd_F1=rep(0,9), minF1=tapply(mean_bl$mean_F1,mean_bl$th,min), maxF1=tapply(mean_bl$mean_F1,mean_bl$th,max), method="baseline", th=c(10,20,30,40,50,60,70,80,90), stringsAsFactors = F) ##min and max of the baseline methods
+
+
+
+mean_all$method[mean_all$method=='empath_new_deu']<-'Empath 2.0'
+mean_all$method[mean_all$method=='freedict_deu']<-'LEXpander'
+mean_all$method[mean_all$method=='fasttext_deu']<-'FastText'
+mean_all$method[mean_all$method=='odenet']<-'OdeNet'
+mean_all$method[mean_all$method=='glove_deu']<-'GloVe'
+##plot F1 
+ ggplot(data = mean_all, aes(x = th)) + 
+  geom_line(aes(y=mean_F1,color=method))+
+   geom_point(aes(y=mean_F1,shape=method))+
+  geom_ribbon(data=bl,aes(ymin=minF1,ymax=maxF1),fill='grey70', alpha = 0.5)+
+        labs(x='percentage random seed words',y='mean F1')+
+        scale_x_continuous(breaks = c(10,20,30,40,50,60,70,80,90))+
+        theme_bw()
+ 
+
+```
+
+Table 5 supplementary materials: percentage of word lists computed
+```{r}
+perc<-"0.3" ##percentage of seed words
+report_df<-data.frame(stringsAsFactors = F)
+for (method in c('freedict','glove','empath_new','fasttext','wordnet','odenet'))  ##loop on the methods
+{
+  if(!method%in%c('wordnet'))
+  {
+    if (method=='odenet')
+    {
+      res<-readRDS(paste0('results/2007deu_',method,'.Rda')) ##loading the results with the German lexicon
+      res<-res[res$length!=0,]##select only the categories for which we had at least one seed word
+      res<-res[res$mean_prec>0|res$mean_rec>0|res$mean_F1>0,] ##select the word lists to which we added at least one word
+      res<-res[res$perc==perc,] ##select only the results relative to the chosen percentage of seed words
+      coverage_de<-round((length(unique(res$cat_id))*100)/68) ##percentage of word lists computed
+      coverage_en<-NA
+      coverage_ev<-NA
+    } 
+    else
+    {
+      res<-readRDS(paste0('results/2007deu_',method,'_deu.Rda')) ##loading the results with the German lexicon
+      res<-res[res$length!=0,]##select only the categories for which we had at least one seed word
+      res<-res[res$mean_prec>0|res$mean_rec>0|res$mean_F1>0,] ##select the word lists to which we added at least one word
+      res<-res[res$perc==perc,] ##select only the results relative to the chosen percentage of seed words
+      coverage_de<-round((length(unique(res$cat_id))*100)/68) ##percentage of word lists computed
+    
+      res<-readRDS(paste0('results/2015en_',method,'.Rda')) ####loading the results with the English lexicon
+      sel<-res[res$perc==perc,] ##select only the results relative to the chosen percentage of seed words
+      sel<-sel[sel$length!=0,]##select only the categories for which we had at least one seed word
+      res<-res[res$mean_prec>0|res$mean_rec>0|res$mean_F1>0,] ##select the word lists to which we added at least one word
+      coverage_en<-round((length(unique(sel$cat_id))*100)/72) ##percentage of word lists computed
+    
+      res<-readRDS(paste0('results/EV_2015en_',method,'.Rda')) ####loading the results with the EVs
+      res<-res[res$length!=0,] ##select only the categories for which we had at least one seed word
+      res<-res[res$prec>0|res$rec>0|res$F1>0,] ##select the word lists to which we added at least one word
+      coverage_ev<-round((length(unique(res$cat_id))*100)/6) ##percentage of word lists computed
+    }
+  }
+  else if (method=='wordnet')
+  {
+    coverage_de<-NA
+    res<-readRDS(paste0('results/2015en_',method,'.Rda')) ##read the results
+    sel<-res[res$perc==perc,] ##select only the results relative to the chosen percentage of seed words
+    sel<-sel[sel$length!=0,] ##select only the categories for which we had at least one seed word
+    sel<-sel[sel$mean_prec>0|sel$mean_rec>0|sel$mean_F1>0,] ##select the word lists to which we added at least one word
+    coverage_en<-round((length(unique(sel$cat_id))*100)/72) ##percentage of word lists computed
+    
+    res<-readRDS(paste0('results/EV_2015en_',method,'.Rda')) ####loading the results with the EVs
+    sel<-res[res$length!=0,] ##select only the categories for which we had at least one seed word
+    sel<-sel[sel$prec>0|sel$rec>0|sel$F1>0,] ##select the word lists to which we added at least one word
+    coverage_ev<-round((length(unique(sel$cat_id))*100)/6) ##percentage of word lists computed
+  }
+report_df<-rbind(report_df,data.frame(method=method,coverage_ev=coverage_ev,coverage_en=coverage_en,coverage_de=coverage_de,stringsAsFactors = F))
+}
+report_df$method[report_df$method=='freedict']<-'LEXpander'
+report_df$method[report_df$method=='empath_new']<-'Empath 2.0'
+report_df$method[report_df$method=='fasttext']<-'FastText'
+report_df$method[report_df$method=='glove']<-'GloVe'
+report_df$method[report_df$method=='odenet']<-'OdeNet'
+report_df$method[report_df$method=='wordnet']<-'WordNet'
+print(report_df)
+```
+
+
+Text analysis: counts of word occurrences in texts
+```{r}
+# tab<-cor_on_texts('EV','wordnet')
+# saveRDS(tab,paste0('results/all_counts_EV_','wordnet','.Rda'))
+```
+
+
+Figure 5: text analysis with annotated word lists
+```{r}
+corr_table<-readRDS('results/corr_table.Rda')
+corr_alltogether_pos<-data.frame(stringsAsFactors = F)
+corr_alltogether_neg<-data.frame(stringsAsFactors = F)
+for(method in unique(corr_table$method.y))
+  {
+  for (dataset in unique(corr_table$dataset))
+  {
+    sel<-corr_table[which((corr_table$method.y==method)&(corr_table$dataset==dataset)&(corr_table$cat==31)),] ##positive word list
+    # ncat<-length(unique(sel$cat))
+    corr_alltogether_pos<-rbind(corr_alltogether_pos,data.frame(method=method,dataset=dataset,corr=sel$corr,ci1=sel$ci1,ci2=sel$ci2,stringsAsFactors = F))
+    
+     sel<-corr_table[which((corr_table$method.y==method)&(corr_table$dataset==dataset)&(corr_table$cat==32)),] ##negative word list
+    # ncat<-length(unique(sel$cat))
+    corr_alltogether_neg<-rbind(corr_alltogether_neg,data.frame(method=method,dataset=dataset,corr=sel$corr,ci1=sel$ci1,ci2=sel$ci2,stringsAsFactors = F))
+  }
+}
+
+
+# corr_table1<-mean_corr_alltogether[!mean_corr_alltogether$dataset%in%c('reddit_home','reddit_family','reddit_TwoXChromosomes','reddit_antiwork'),]
+corr_table1<-corr_alltogether_neg
+corr_table1<-corr_table1[!corr_table1$dataset %in% c('hourly_tweets_random1000','hourly_tweets'),]
+corr_table1<-corr_table1[!corr_table1$dataset %in% c('coha_selected','reddit_home','reddit_family','reddit_TwoXChromosomes','reddit_antiwork'),]
+corr_table1$order<-NA
+corr_table1$order[corr_table1$method=='EV']<-1
+corr_table1$order[corr_table1$method=='empath_new']<-4
+corr_table1$order[corr_table1$method=='freedict']<-2
+corr_table1$order[corr_table1$method=='fasttext']<-5
+corr_table1$order[corr_table1$method=='wordnet']<-3
+corr_table1$order[corr_table1$method=='glove']<-6
+
+
+corr_table1$method[corr_table1$method=='empath_new']<-'Empath 2.0'
+corr_table1$method[corr_table1$method=='freedict']<-'LEXpander'
+corr_table1$method[corr_table1$method=='fasttext']<-'FastText'
+corr_table1$method[corr_table1$method=='wordnet']<-'WordNet'
+corr_table1$method[corr_table1$method=='glove']<-'GloVe'
+
+
+ggplot(corr_table1, aes(x=dataset, y=corr, fill=reorder(method,order))) +
+geom_errorbar(aes(ymin=ci1, ymax=ci2),
+              size=.3,    # Thinner lines
+              width=.2,
+              position=position_dodge(.9)) +
+  geom_point(aes(colour=reorder(method,order),
+                 shape=reorder(method,order)),
+             size=2,
+             position=position_dodge(.9))+
+    xlab("Dataset") +
+    ylab("Mean correlation") +
+  # labs(fill='method')+
+   scale_x_discrete(labels=c('Brown corpus','COHA','Daily tweets','Reddit'))+
+  theme(axis.text.x = element_text(angle = 45,hjust=1))+
+  theme_bw()
+
+
+```
